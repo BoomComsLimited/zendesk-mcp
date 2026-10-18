@@ -57,6 +57,12 @@ def register_all(mcp) -> None:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "serve":
+        # Boom fork: per-user streamable HTTP; each request uses the caller's own Zendesk token.
+        from zendesk_mcp.per_user import serve
+        serve()
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] == "setup":
         from zendesk_mcp.setup import run_setup
         run_setup()

@@ -148,6 +148,16 @@ def request(
     revoked server-side or a clock skew that made it look valid.
     """
     kwargs.setdefault("timeout", 30)
+    from zendesk_mcp.request_token import request_token
+    per_user = request_token()
+    if per_user:
+        # Boom fork: per-user mode uses the caller's token and never the config file. A 401
+        # here means their token was revoked or expired; claude.ai renews it on the next try.
+        headers = {**kwargs.pop("headers", {}), "Authorization": f"Bearer {per_user[1]}"}
+        response = httpx.request(method, url, headers=headers, **kwargs)
+        if response.status_code == 401:
+            raise TokenExpiredError("Zendesk rejected your sign-in. Reconnect the Zendesk connector in Claude.")
+        return response
     _, token = valid_token(config_file, now)
     headers = {**kwargs.pop("headers", {}), "Authorization": f"Bearer {token}"}
     response = httpx.request(method, url, headers=headers, **kwargs)

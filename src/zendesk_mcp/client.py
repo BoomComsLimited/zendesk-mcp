@@ -1,6 +1,7 @@
 from pathlib import Path
 from zenpy import Zenpy
 from zendesk_mcp.auth import valid_token
+from zendesk_mcp.request_token import request_token
 
 
 class ConfigError(Exception):
@@ -8,6 +9,9 @@ class ConfigError(Exception):
 
 
 def get_client(config_file: Path | None = None) -> Zenpy:
+    per_user = request_token()
+    if per_user:
+        return Zenpy(subdomain=per_user[0], oauth_token=per_user[1])
     subdomain, token = valid_token(config_file)
     if not subdomain or not token:
         raise ConfigError("Zendesk not configured. Run: zendesk-mcp setup")
@@ -19,6 +23,9 @@ def get_oauth_session() -> tuple[str, str]:
 
     Raises ConfigError if unconfigured, TokenExpiredError if the token cannot be renewed.
     """
+    per_user = request_token()
+    if per_user:
+        return per_user
     subdomain, token = valid_token()
     if not subdomain or not token:
         raise ConfigError("Zendesk not configured. Run: zendesk-mcp setup")
