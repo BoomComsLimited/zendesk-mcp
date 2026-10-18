@@ -32,6 +32,7 @@ def register_all(mcp) -> None:
     from zendesk_mcp.tools.groups import register_group_tools
     from zendesk_mcp.tools.organizations import register_organization_tools
     from zendesk_mcp.tools.custom_statuses import register_custom_status_tools
+    from zendesk_mcp.tools.help_center import register_help_center_tools
     from zendesk_mcp.prompts import register_prompts
 
     register_ticket_tools(mcp)
@@ -48,6 +49,7 @@ def register_all(mcp) -> None:
     register_tag_tools(mcp)
     register_view_tools(mcp)
     register_macro_tools(mcp)
+    register_help_center_tools(mcp)
     register_user_tools(mcp)
     register_group_tools(mcp)
     register_organization_tools(mcp)

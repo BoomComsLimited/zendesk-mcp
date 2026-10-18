@@ -18,7 +18,7 @@ Configuration (environment):
   ZENDESK_SUBDOMAIN                  e.g. boomsupport
   ZENDESK_MCP_BASE_URL               public URL of this server, e.g. https://zendesk.mcp.example
   ZENDESK_MCP_ALLOWED_EMAIL_DOMAINS  comma-separated, e.g. boom.limited (empty = any domain)
-  ZENDESK_MCP_SCOPES                 scopes requested at sign-in (default "read tickets:write")
+  ZENDESK_MCP_SCOPES                 scopes requested at sign-in (default "read tickets:write hc:write")
   ZENDESK_MCP_NAME, ZENDESK_MCP_INSTRUCTIONS   the MCP server name and instructions for Claude
 """
 from __future__ import annotations
@@ -59,7 +59,7 @@ def base_url() -> str:
 
 
 def scopes() -> list[str]:
-    return _env("ZENDESK_MCP_SCOPES", "read tickets:write").split()
+    return _env("ZENDESK_MCP_SCOPES", "read tickets:write hc:write").split()
 
 
 def allowed_domains() -> frozenset[str]:

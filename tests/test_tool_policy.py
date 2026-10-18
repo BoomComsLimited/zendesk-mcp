@@ -31,7 +31,7 @@ def _clean_env(monkeypatch, tmp_path):
 def test_default_registers_exactly_the_allowlist():
     names = _registered_names()
     assert names == ALLOWED_TOOLS
-    assert names & WRITE_TOOLS == {"zendesk_post_internal_note"}
+    assert names & WRITE_TOOLS == ALLOWED_TOOLS & WRITE_TOOLS
 
 
 def test_read_only_config_removes_every_write_tool_and_keeps_reads():

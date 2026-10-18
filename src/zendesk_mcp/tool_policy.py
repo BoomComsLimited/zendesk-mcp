@@ -27,6 +27,9 @@ from zendesk_mcp.config import config_path, load_config
 WRITE_TOOLS = frozenset({
     "zendesk_add_tag",
     "zendesk_apply_macro",
+    "zendesk_create_article_draft",
+    "zendesk_propose_article_update",
+    "zendesk_update_article_draft",
     "zendesk_assign_ticket",
     "zendesk_create_ticket",
     "zendesk_log_time",
@@ -60,6 +63,13 @@ ALLOWED_TOOLS = frozenset({
     "zendesk_list_custom_statuses",
     "zendesk_get_time_tracking",
     "zendesk_post_internal_note",
+    # help centre: read freely, write only as drafts (see tools/help_center.py)
+    "zendesk_list_help_center_sections",
+    "zendesk_list_articles",
+    "zendesk_get_article",
+    "zendesk_create_article_draft",
+    "zendesk_update_article_draft",
+    "zendesk_propose_article_update",
 })
 
 _TRUE = {"1", "true", "yes", "on"}
