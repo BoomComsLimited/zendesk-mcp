@@ -2,7 +2,11 @@ import asyncio
 
 import pytest
 
-from zendesk_mcp.tool_policy import WRITE_TOOLS, _ToolPolicy, disabled_tools
+from zendesk_mcp.tool_policy import ALLOWED_TOOLS, WRITE_TOOLS, _ToolPolicy, disabled_tools
+
+# Boom fork: only ALLOWED_TOOLS can ever register, so the one write tool that can be enabled
+# is the internal note. The tests below check the disabling mechanism within that allowlist.
+ALLOWED_WRITE = ALLOWED_TOOLS & WRITE_TOOLS
 
 
 def _registered_names(cfg=None, env=None):
@@ -24,10 +28,10 @@ def _clean_env(monkeypatch, tmp_path):
     monkeypatch.setattr("zendesk_mcp.config.Path.home", lambda: tmp_path)
 
 
-def test_default_registers_everything_including_write_tools():
+def test_default_registers_exactly_the_allowlist():
     names = _registered_names()
-    assert WRITE_TOOLS <= names
-    assert "zendesk_get_ticket" in names
+    assert names == ALLOWED_TOOLS
+    assert names & WRITE_TOOLS == {"zendesk_post_internal_note"}
 
 
 def test_read_only_config_removes_every_write_tool_and_keeps_reads():
@@ -43,31 +47,30 @@ def test_read_only_env_removes_write_tools():
 
 @pytest.mark.parametrize("value", ["false", "0", "", "no"])
 def test_read_only_falsey_values_leave_tools_enabled(value):
-    assert WRITE_TOOLS <= _registered_names(env={"ZENDESK_MCP_READ_ONLY": value})
+    assert ALLOWED_WRITE <= _registered_names(env={"ZENDESK_MCP_READ_ONLY": value})
 
 
 def test_disabled_tools_removes_only_the_named_tools():
-    names = _registered_names(cfg={"disabled_tools": ["zendesk_post_comment"]})
-    assert "zendesk_post_comment" not in names
-    assert "zendesk_post_internal_note" in names
-    assert "zendesk_update_ticket" in names
+    names = _registered_names(cfg={"disabled_tools": ["zendesk_post_internal_note"]})
+    assert "zendesk_post_internal_note" not in names
+    assert {"zendesk_get_ticket", "zendesk_get_groups"} <= names
 
 
 def test_disabled_tools_env_is_comma_separated_and_merges_with_config():
     names = _registered_names(
-        cfg={"disabled_tools": ["zendesk_post_comment"]},
-        env={"ZENDESK_MCP_DISABLED_TOOLS": " zendesk_apply_macro , zendesk_create_ticket "},
+        cfg={"disabled_tools": ["zendesk_post_internal_note"]},
+        env={"ZENDESK_MCP_DISABLED_TOOLS": " zendesk_get_groups , zendesk_list_macros "},
     )
-    assert not ({"zendesk_post_comment", "zendesk_apply_macro", "zendesk_create_ticket"} & names)
-    assert "zendesk_update_ticket" in names
+    assert not ({"zendesk_post_internal_note", "zendesk_get_groups", "zendesk_list_macros"} & names)
+    assert "zendesk_get_ticket" in names
 
 
 def test_unknown_disabled_tool_is_reported_on_stderr_not_stdout(capsys):
-    _registered_names(cfg={"disabled_tools": ["zendesk_nope", "zendesk_post_comment"]})
+    _registered_names(cfg={"disabled_tools": ["zendesk_nope", "zendesk_post_internal_note"]})
     out = capsys.readouterr()
     assert out.out == ""
     assert "zendesk_nope" in out.err
-    assert "zendesk_post_comment" not in out.err
+    assert "zendesk_post_internal_note" not in out.err
 
 
 def test_no_warning_when_nothing_is_disabled(capsys):
@@ -134,10 +137,15 @@ def test_readable_config_with_read_only_is_applied_silently(tmp_path, capsys):
 # --- the filter must see every tool, however it is declared (review note on #19) -------------
 
 
-def test_every_write_tool_name_is_a_registered_tool():
-    """A rename or a reclassified write tool must fail here, not quietly leave WRITE_TOOLS stale."""
+def test_every_write_tool_name_is_a_registered_tool(monkeypatch):
+    """A rename or a reclassified write tool must fail here, not quietly leave WRITE_TOOLS stale.
+
+    Boom fork: lift the allowlist to see every declared tool. zendesk_post_comment is the one
+    write tool the fork deletes outright, so it is expected to be missing.
+    """
+    monkeypatch.setattr("zendesk_mcp.tool_policy.ALLOWED_TOOLS", ALLOWED_TOOLS | WRITE_TOOLS)
     names = _registered_names()
-    assert sorted(WRITE_TOOLS - names) == []
+    assert sorted(WRITE_TOOLS - names) == ["zendesk_post_comment"]
 
 
 def test_disabling_every_registered_tool_by_name_leaves_nothing_registered(capsys):
@@ -170,6 +178,13 @@ class _StubMCP:
         return decorator
 
 
+@pytest.fixture
+def wide_allowlist(monkeypatch):
+    # The decorator-form tests use names outside the Boom allowlist; widen it for them only.
+    monkeypatch.setattr("zendesk_mcp.tool_policy.ALLOWED_TOOLS", frozenset({
+        "zendesk_post_comment", "renamed_tool", "positional_tool", "zendesk_assign_ticket", "zendesk_get_ticket"}))
+
+
 def _declare(policy):
     @policy.tool()
     def zendesk_post_comment():  # default name
@@ -192,6 +207,7 @@ def _declare(policy):
         pass
 
 
+@pytest.mark.usefixtures("wide_allowlist")
 def test_policy_skips_tools_declared_with_a_keyword_name():
     stub = _StubMCP()
     _declare(_ToolPolicy(stub, frozenset({"renamed_tool"})))
@@ -199,12 +215,14 @@ def test_policy_skips_tools_declared_with_a_keyword_name():
     assert {"zendesk_post_comment", "positional_tool", "zendesk_assign_ticket", "zendesk_get_ticket"} <= set(stub.registered)
 
 
+@pytest.mark.usefixtures("wide_allowlist")
 def test_policy_skips_tools_declared_with_a_positional_name():
     stub = _StubMCP()
     _declare(_ToolPolicy(stub, frozenset({"positional_tool"})))
     assert "positional_tool" not in stub.registered and "another_function" not in stub.registered
 
 
+@pytest.mark.usefixtures("wide_allowlist")
 def test_policy_skips_tools_declared_with_the_bare_decorator():
     stub = _StubMCP()
     _declare(_ToolPolicy(stub, frozenset({"zendesk_assign_ticket"})))
@@ -212,6 +230,7 @@ def test_policy_skips_tools_declared_with_the_bare_decorator():
     assert "zendesk_post_comment" in stub.registered
 
 
+@pytest.mark.usefixtures("wide_allowlist")
 def test_policy_skips_the_default_named_tool_and_reports_nothing_unknown(capsys):
     stub = _StubMCP()
     policy = _ToolPolicy(stub, frozenset({"zendesk_post_comment"}))
@@ -221,6 +240,7 @@ def test_policy_skips_the_default_named_tool_and_reports_nothing_unknown(capsys)
     assert capsys.readouterr().err == ""
 
 
+@pytest.mark.usefixtures("wide_allowlist")
 def test_policy_skips_every_declaration_form_at_once_and_registers_the_rest():
     stub = _StubMCP()
     every = frozenset({"zendesk_post_comment", "renamed_tool", "positional_tool", "zendesk_assign_ticket"})

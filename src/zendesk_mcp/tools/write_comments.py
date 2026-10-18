@@ -4,14 +4,14 @@ from zendesk_mcp.client import get_client, ConfigError
 from zendesk_mcp.auth import api_error_message, TokenExpiredError
 
 
-def _post_comment_data(ticket_id: int, body: str, public: bool) -> str:
+def _post_internal_note_data(ticket_id: int, body: str) -> str:
+    """Boom fork: always an internal note. There is deliberately no parameter for public."""
     try:
         client = get_client()
         ticket = Ticket(id=ticket_id)
-        ticket.comment = Comment(body=body, public=public)
+        ticket.comment = Comment(body=body, public=False)
         client.tickets.update(ticket)
-        label = "Public comment" if public else "Internal note"
-        return f"{label} posted successfully on ticket #{ticket_id}."
+        return f"Internal note posted successfully on ticket #{ticket_id}."
     except (ConfigError, TokenExpiredError) as e:
         return str(e)
     except Exception as e:
@@ -21,12 +21,9 @@ def _post_comment_data(ticket_id: int, body: str, public: bool) -> str:
 
 
 def register_write_comment_tools(mcp) -> None:
-    @mcp.tool()
-    def zendesk_post_comment(ticket_id: int, body: str) -> str:
-        """Post a public reply on a Zendesk ticket. The reply is visible to the requester. Use for customer-facing responses."""
-        return _post_comment_data(ticket_id, body, public=True)
-
+    # Boom fork: the public-reply tool (zendesk_post_comment) has been removed. This server
+    # drafts for a human: it can only add notes that agents see and the requester never does.
     @mcp.tool()
     def zendesk_post_internal_note(ticket_id: int, body: str) -> str:
-        """Post an internal note on a Zendesk ticket. Internal notes are only visible to agents and are not sent to the requester."""
-        return _post_comment_data(ticket_id, body, public=False)
+        """Post an internal note on a Zendesk ticket. Internal notes are only visible to agents and are never sent to the requester. Use this to draft a suggested reply for an agent to review and send."""
+        return _post_internal_note_data(ticket_id, body)

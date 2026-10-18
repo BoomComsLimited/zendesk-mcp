@@ -33,7 +33,8 @@ def test_register_all_registers_tools(registered_server):
     tools = asyncio.run(registered_server.list_tools())
     names = {t.name for t in tools}
     assert "zendesk_get_ticket" in names
-    assert len(names) > 20
+    from zendesk_mcp.tool_policy import ALLOWED_TOOLS
+    assert names == ALLOWED_TOOLS  # Boom fork: exactly the allowlist
 
 
 def test_register_all_registers_prompts(registered_server):

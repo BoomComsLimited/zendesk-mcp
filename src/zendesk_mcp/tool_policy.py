@@ -37,6 +37,31 @@ WRITE_TOOLS = frozenset({
     "zendesk_update_ticket",
 })
 
+# Boom fork: a hard allowlist. Only these tools are ever registered, whatever the config file or
+# environment says, so the server can read tickets and add internal notes but can never reply
+# to a customer, change a ticket, apply a macro or log time. Disabling (below) can only narrow
+# this further. Change it here, in code review, not in deployment config.
+ALLOWED_TOOLS = frozenset({
+    "zendesk_search_tickets",
+    "zendesk_get_tickets",
+    "zendesk_get_ticket",
+    "zendesk_get_comments",
+    "zendesk_list_attachments",
+    "zendesk_download_attachment",
+    "zendesk_list_views",
+    "zendesk_get_view",
+    "zendesk_get_view_tickets",
+    "zendesk_list_macros",
+    "zendesk_preview_macro",
+    "zendesk_search_users",
+    "zendesk_get_groups",
+    "zendesk_get_group_users",
+    "zendesk_get_organization",
+    "zendesk_list_custom_statuses",
+    "zendesk_get_time_tracking",
+    "zendesk_post_internal_note",
+})
+
 _TRUE = {"1", "true", "yes", "on"}
 
 
@@ -95,7 +120,7 @@ class _ToolPolicy:
             print(f"zendesk-mcp: ignoring unknown tool in disabled list: {name}", file=sys.stderr)
 
     def _skip(self, tool_name: str) -> bool:
-        if tool_name in self._disabled:
+        if tool_name not in ALLOWED_TOOLS or tool_name in self._disabled:
             self.skipped.add(tool_name)
             return True
         return False
