@@ -78,8 +78,8 @@ def _get_ticket_data(ticket_id: int) -> str:
 
 
 def _get_subdomain() -> str:
-    from zendesk_mcp.config import load_config
-    return load_config().get("subdomain", "")
+    from zendesk_mcp.request_token import current_subdomain
+    return current_subdomain()
 
 
 def register_ticket_tools(mcp) -> None:

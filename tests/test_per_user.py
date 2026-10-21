@@ -152,3 +152,35 @@ def test_per_user_server_keeps_the_allowlist():
     srv = per_user.build_server()
     names = {t.name for t in asyncio.run(srv.list_tools())}
     assert names == ALLOWED_TOOLS
+
+
+# --- server mode has no config file: the subdomain must come from the request ------------------
+
+def test_attachment_url_check_uses_the_request_subdomain_in_server_mode():
+    from zendesk_mcp.tools.attachments import _validate_attachment_url
+    reset = _as_user("tok")
+    try:
+        assert _validate_attachment_url("https://example.zendesk.com/attachments/token/x") is None
+        assert "Refusing" in _validate_attachment_url("https://evil.example.com/steal")
+    finally:
+        auth_context_var.reset(reset)
+
+
+def test_ticket_links_use_the_request_subdomain_in_server_mode():
+    from zendesk_mcp.tools.ticket import _get_subdomain
+    reset = _as_user("tok")
+    try:
+        assert _get_subdomain() == "example"
+    finally:
+        auth_context_var.reset(reset)
+
+
+def test_listing_asks_zendesk_for_inline_images():
+    from zendesk_mcp.tools import attachments
+    att = MagicMock(file_name="s.png", content_type="image/png", size=10, content_url="u", inline=True)
+    client = MagicMock()
+    client.tickets.comments.return_value = [MagicMock(id=1, attachments=[att])]
+    with patch("zendesk_mcp.tools.attachments.get_client", return_value=client):
+        out = attachments._list_attachments_data(5)
+    assert client.tickets.comments.call_args.kwargs.get("include_inline_images") is True
+    assert '"inline": true' in out

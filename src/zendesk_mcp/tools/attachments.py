@@ -15,14 +15,15 @@ from zendesk_mcp.client import get_client, ConfigError
 from zendesk_mcp.config import attachment_cache_dir, load_config
 from zendesk_mcp import auth
 from zendesk_mcp.auth import api_error_message, TokenExpiredError
-from zendesk_mcp.request_token import request_token
+from zendesk_mcp.request_token import current_subdomain, request_token
 from mcp.types import ImageContent, TextContent
 
 
 def _list_attachments_data(ticket_id: int) -> str:
     try:
         client = get_client()
-        comments = client.tickets.comments(ticket_id)
+        # Inline images (screenshots pasted into an email) are left out unless asked for.
+        comments = client.tickets.comments(ticket_id, include_inline_images=True)
         result = []
         for comment in comments:
             for att in (comment.attachments or []):
@@ -31,6 +32,7 @@ def _list_attachments_data(ticket_id: int) -> str:
                     "filename": att.file_name,
                     "content_type": att.content_type,
                     "size_bytes": att.size,
+                    "inline": bool(getattr(att, "inline", False)),
                     "download_url": att.content_url,
                 })
         return json.dumps(result, indent=2)
@@ -66,7 +68,7 @@ def _validate_attachment_url(attachment_url: str) -> str | None:
     by the model (and so, indirectly, by whoever wrote the ticket). Pinning it to
     ``https://<subdomain>.zendesk.com`` keeps the token from being sent anywhere else.
     """
-    subdomain = (load_config().get("subdomain") or "").strip().lower()
+    subdomain = current_subdomain().lower()
     if not subdomain:
         return "Zendesk not configured. Run: zendesk-mcp setup"
     parsed = urlparse(attachment_url)

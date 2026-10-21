@@ -11,7 +11,10 @@ from zendesk_mcp.client import ConfigError
 
 @pytest.fixture(autouse=True)
 def _configured_subdomain():
-    with patch("zendesk_mcp.tools.attachments.load_config", return_value={"subdomain": "acme"}):
+    # the subdomain check reads the shared config loader (via current_subdomain); the dest_dir
+    # allowlist still reads the module's own import
+    with patch("zendesk_mcp.tools.attachments.load_config", return_value={"subdomain": "acme"}), \
+         patch("zendesk_mcp.config.load_config", return_value={"subdomain": "acme"}):
         yield
 
 
@@ -322,9 +325,10 @@ def test_download_rejects_url_outside_zendesk_host(mock_request, mock_cache_dir,
     assert not (tmp_path / "attachments").exists()
 
 
+@patch("zendesk_mcp.config.load_config", return_value={})
 @patch("zendesk_mcp.tools.attachments.load_config", return_value={})
 @patch("zendesk_mcp.tools.attachments.auth.request")
-def test_download_requires_configured_subdomain(mock_request, _cfg):
+def test_download_requires_configured_subdomain(mock_request, _cfg, _shared_cfg):
     from zendesk_mcp.tools.attachments import _download_attachment_data
     result = json.loads(_download_attachment_data("https://acme.zendesk.com/a.txt", "a.txt", 12345))
 

@@ -16,3 +16,13 @@ def request_token() -> tuple[str, str] | None:
     from zendesk_mcp.per_user import subdomain
 
     return subdomain(), access.token
+
+
+def current_subdomain() -> str:
+    """The Zendesk subdomain for this call: the signed-in request's in server mode (where there is
+    no config file), otherwise the config file's."""
+    per_user = request_token()
+    if per_user:
+        return per_user[0]
+    from zendesk_mcp.config import load_config
+    return (load_config().get("subdomain") or "").strip()
