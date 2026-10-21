@@ -197,26 +197,63 @@ def test_download_allows_dest_dir_inside_cache(mock_request, mock_cache_dir, tmp
     assert (inside / "a.txt").read_text() == "hi"
 
 
-@patch("zendesk_mcp.tools.attachments.attachment_cache_dir")
-@patch("zendesk_mcp.tools.attachments.auth.request")
-def test_download_image_returns_base64(mock_httpx_get, mock_cache_dir, tmp_path):
-    mock_cache_dir.return_value = tmp_path / "attachments" / "12345"
+def _image_bytes(fmt, size=(1200, 800)):
     import io
     from PIL import Image
-    img = Image.new("RGB", (1, 1), color=(255, 0, 0))
+    img = Image.new("RGB", size, color=(255, 0, 0))
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    mock_httpx_get.return_value = MagicMock(
-        content=buf.getvalue(),
-        raise_for_status=lambda: None,
-    )
+    img.save(buf, format=fmt)
+    return buf.getvalue()
 
+
+def _download(mock_get, mock_cache_dir, tmp_path, raw, name):
+    mock_cache_dir.return_value = tmp_path / "attachments" / "12345"
+    mock_get.return_value = MagicMock(content=raw, raise_for_status=lambda: None)
     from zendesk_mcp.tools.attachments import _download_attachment_data
-    result = json.loads(_download_attachment_data("https://acme.zendesk.com/screen.png", "screen.png", 12345))
+    return _download_attachment_data(f"https://acme.zendesk.com/{name}", name, 12345)
 
-    assert result["type"] == "image"
-    assert result["encoding"] == "base64"
-    assert len(result["data"]) > 0
+
+@patch("zendesk_mcp.tools.attachments.attachment_cache_dir")
+@patch("zendesk_mcp.tools.attachments.auth.request")
+def test_image_is_returned_as_image_content_with_identical_bytes(mock_get, mock_cache_dir, tmp_path):
+    # Boom fork: never resized or recompressed, so text in screenshots stays legible.
+    raw = _image_bytes("PNG")
+    result = _download(mock_get, mock_cache_dir, tmp_path, raw, "screen.png")
+    image = [c for c in result if getattr(c, "type", None) == "image"][0]
+    assert image.mime_type == "image/png"
+    assert base64.b64decode(image.data) == raw
+
+
+@patch("zendesk_mcp.tools.attachments.attachment_cache_dir")
+@patch("zendesk_mcp.tools.attachments.auth.request")
+def test_unsupported_format_is_converted_losslessly_at_the_same_size(mock_get, mock_cache_dir, tmp_path):
+    import io
+    from PIL import Image
+    result = _download(mock_get, mock_cache_dir, tmp_path, _image_bytes("BMP", (1600, 900)), "scan.bmp")
+    image = [c for c in result if getattr(c, "type", None) == "image"][0]
+    assert image.mime_type == "image/png"
+    with Image.open(io.BytesIO(base64.b64decode(image.data))) as out:
+        assert out.size == (1600, 900)
+
+
+@patch("zendesk_mcp.tools.attachments.attachment_cache_dir")
+@patch("zendesk_mcp.tools.attachments.auth.request")
+def test_an_oversized_image_is_refused_not_shrunk(mock_get, mock_cache_dir, tmp_path, monkeypatch):
+    monkeypatch.setattr("zendesk_mcp.tools.attachments._MAX_IMAGE_BYTES", 100)
+    result = json.loads(_download(mock_get, mock_cache_dir, tmp_path, _image_bytes("PNG"), "big.png"))
+    assert result["type"] == "error" and "not shrunk" in result["message"]
+
+
+@patch("zendesk_mcp.tools.attachments.auth.request")
+def test_server_mode_keeps_no_files(mock_get, tmp_path, monkeypatch):
+    import tempfile
+    monkeypatch.setattr("zendesk_mcp.tools.attachments.request_token", lambda: ("acme", "tok"))
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    mock_get.return_value = MagicMock(content=_image_bytes("PNG", (10, 10)), raise_for_status=lambda: None)
+    from zendesk_mcp.tools.attachments import _download_attachment_data
+    result = _download_attachment_data("https://acme.zendesk.com/s.png", "s.png", 1)
+    assert any(getattr(c, "type", None) == "image" for c in result)
+    assert list(tmp_path.iterdir()) == []
 
 
 @patch("zendesk_mcp.tools.attachments.attachment_cache_dir")

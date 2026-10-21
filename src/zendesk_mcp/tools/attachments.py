@@ -1,5 +1,8 @@
 import base64
+import io
 import json
+import shutil
+import tempfile
 import tarfile
 import zipfile
 from pathlib import Path
@@ -12,6 +15,8 @@ from zendesk_mcp.client import get_client, ConfigError
 from zendesk_mcp.config import attachment_cache_dir, load_config
 from zendesk_mcp import auth
 from zendesk_mcp.auth import api_error_message, TokenExpiredError
+from zendesk_mcp.request_token import request_token
+from mcp.types import ImageContent, TextContent
 
 
 def _list_attachments_data(ticket_id: int) -> str:
@@ -38,7 +43,12 @@ def _list_attachments_data(ticket_id: int) -> str:
 
 
 _TEXT_EXTENSIONS = {".log", ".txt", ".json", ".yaml", ".yml", ".xml", ".csv", ".sh", ".py", ".go", ".md"}
-_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"}
+# Boom fork: images are returned at full resolution, never resized or recompressed: shrinking a
+# screenshot degrades the text in it. Formats Claude displays pass through byte for byte; others
+# are converted to PNG losslessly at the same pixel size.
+_PASSTHROUGH_FORMATS = {"PNG": "image/png", "JPEG": "image/jpeg", "GIF": "image/gif", "WEBP": "image/webp"}
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024  # Claude's per-image limit; larger images are refused, not shrunk
 
 # Bounds applied to tool response payloads to stay within MCP transport limits.
 _ARCHIVE_FILE_LIST_CAP = 500
@@ -98,6 +108,14 @@ def _download_attachment_data(
     url_error = _validate_attachment_url(attachment_url)
     if url_error:
         return json.dumps({"type": "error", "message": url_error})
+    if request_token():
+        # Boom fork, server mode: download into a temporary folder that is removed when the call
+        # ends, so customers' files never accumulate on the server. dest_dir is not offered here.
+        tmp = tempfile.mkdtemp(prefix="zd-att-")
+        try:
+            return _download_into(attachment_url, filename, Path(tmp))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
     if dest_dir:
         target_dir, dest_error = _resolve_dest_dir(dest_dir, ticket_id)
         if dest_error:
@@ -105,6 +123,10 @@ def _download_attachment_data(
     else:
         target_dir = attachment_cache_dir(ticket_id)
     target_dir.mkdir(parents=True, exist_ok=True)
+    return _download_into(attachment_url, filename, target_dir)
+
+
+def _download_into(attachment_url: str, filename: str, target_dir: Path):
     # Strip path components from filename to prevent directory traversal
     safe_filename = Path(filename).name
     dest = target_dir / safe_filename
@@ -264,21 +286,26 @@ def _handle_pdf(dest: Path) -> str:
         return json.dumps({"type": "error", "message": f"PDF text extraction failed: {e}", "cached_path": str(dest)})
 
 
-def _handle_image(dest: Path) -> str:
+def _handle_image(dest: Path):
+    """Return the image itself as MCP image content, at full resolution (Boom fork)."""
     try:
-        import io
-        with Image.open(dest) as img:
-            buf = io.BytesIO()
-            img.save(buf, format=img.format or "PNG")
-            data = base64.b64encode(buf.getvalue()).decode()
-        return json.dumps({
-            "type": "image",
-            "encoding": "base64",
-            "data": data,
-            "cached_path": str(dest),
-        })
+        raw = dest.read_bytes()
+        with Image.open(io.BytesIO(raw)) as img:
+            fmt, (w, h) = (img.format or "").upper(), img.size
+            if fmt in _PASSTHROUGH_FORMATS:
+                data, mime = raw, _PASSTHROUGH_FORMATS[fmt]
+            else:
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")  # lossless, same dimensions
+                data, mime = buf.getvalue(), "image/png"
+        if len(data) > _MAX_IMAGE_BYTES:
+            return json.dumps({"type": "error", "message": (
+                f"Image is {len(data) / 1048576:.1f} MB ({w}x{h}), over the {_MAX_IMAGE_BYTES // 1048576} MB a model can "
+                f"receive. It was not shrunk, to keep its text legible; open it in Zendesk instead.")})
+        return [TextContent(type="text", text=f"{dest.name}: {w}x{h} {mime}, {len(data)} bytes, full resolution"),
+                ImageContent(type="image", data=base64.b64encode(data).decode(), mimeType=mime)]
     except Exception as e:
-        return json.dumps({"type": "error", "message": f"Image processing failed: {e}", "cached_path": str(dest)})
+        return json.dumps({"type": "error", "message": f"Image processing failed: {e}"})
 
 
 def register_attachment_tools(mcp) -> None:
@@ -293,6 +320,6 @@ def register_attachment_tools(mcp) -> None:
         filename: str,
         ticket_id: int,
         dest_dir: str | None = None,
-    ) -> str:
-        """Download a Zendesk attachment. Obtain attachment_url and filename from zendesk_list_attachments. ticket_id is required for cache organization. Optional dest_dir overrides the default cache location (it must be inside the cache or a directory listed in 'attachment_allowed_dest_dirs' in the config); the file is written there and (for archives) extracted alongside it. Archives return a file list and unpack_dir — read individual files with your normal file tools. PDFs return up to ~500KB of extracted text. Images are base64-encoded."""
+    ) -> list | str:
+        """Download a Zendesk attachment. Obtain attachment_url and filename from zendesk_list_attachments. ticket_id is required for cache organization. Optional dest_dir overrides the default cache location (it must be inside the cache or a directory listed in 'attachment_allowed_dest_dirs' in the config); the file is written there and (for archives) extracted alongside it. Archives return a file list and unpack_dir — read individual files with your normal file tools. PDFs return up to ~500KB of extracted text. Images are returned as images at full resolution, so screenshots can be read; one over 5 MB is refused rather than shrunk."""
         return _download_attachment_data(attachment_url, filename, ticket_id, dest_dir)
