@@ -316,7 +316,9 @@ def register_attachment_tools(mcp) -> None:
         """List all attachments across all comments for a Zendesk ticket. Returns filename, content type, size, and download URL for each. Use zendesk_download_attachment to fetch file contents."""
         return _list_attachments_data(ticket_id)
 
-    @mcp.tool()
+    # structured_output=False: otherwise the SDK also serialises the returned image into the
+    # result's text, sending the base64 twice.
+    @mcp.tool(structured_output=False)
     def zendesk_download_attachment(
         attachment_url: str,
         filename: str,

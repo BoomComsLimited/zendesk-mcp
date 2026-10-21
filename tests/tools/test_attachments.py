@@ -430,3 +430,24 @@ def test_download_tar_over_member_limit_is_refused(mock_request, mock_cache_dir,
 
     assert result["type"] == "error"
     assert "entries" in result["message"]
+
+
+def test_downloaded_image_is_sent_once_not_repeated_in_text():
+    """The SDK's default structured output serialises the returned image into the result's text too."""
+    import asyncio
+    from mcp.server.mcpserver import MCPServer
+    from mcp.types import TextContent, ImageContent
+    from zendesk_mcp.tools.attachments import register_attachment_tools
+
+    b64 = base64.b64encode(b"\x89PNG fake image bytes").decode()
+    srv = MCPServer("t")
+    register_attachment_tools(srv)
+    blocks = [TextContent(type="text", text="shot.png: 10x10 image/png"),
+              ImageContent(type="image", data=b64, mimeType="image/png")]
+    with patch("zendesk_mcp.tools.attachments._download_attachment_data", return_value=blocks):
+        result = asyncio.run(srv.call_tool("zendesk_download_attachment", {
+            "attachment_url": "https://acme.zendesk.com/x", "filename": "shot.png", "ticket_id": 1}))
+    texts = [c.text for c in result.content if c.type == "text"]
+    assert [c.type for c in result.content] == ["text", "image"]
+    assert not any(b64 in t for t in texts)
+    assert not result.structured_content or b64 not in json.dumps(result.structured_content)
