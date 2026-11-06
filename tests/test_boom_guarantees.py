@@ -1,7 +1,8 @@
 """Boom fork: the guarantees this deployment relies on. If any of these fail, do not deploy.
 
-The server must be able to read tickets and add internal notes, and nothing else that writes.
-In particular it must never be able to send anything a customer can see.
+The server can read tickets, add internal notes, post public replies and write help-centre
+drafts, and nothing else that writes. A note is always private and a reply always public: no
+tool takes a flag that switches between them.
 """
 import asyncio
 from unittest.mock import MagicMock, patch
@@ -37,20 +38,20 @@ def test_only_allowlisted_tools_are_registered():
     assert names <= ALLOWED_TOOLS, f"not allowlisted: {sorted(names - ALLOWED_TOOLS)}"
 
 
-# The only writes: an internal note on a ticket, and NEW help-centre drafts. Nothing that a
-# customer can see, nothing that changes a ticket or an existing article.
-ALLOWED_WRITES = {"zendesk_post_internal_note", "zendesk_create_article_draft", "zendesk_propose_article_update",
-                  "zendesk_update_article_draft"}
+# The only writes: an internal note or a public reply on a ticket, and NEW help-centre drafts.
+# Nothing that changes a ticket's fields or an existing article.
+ALLOWED_WRITES = {"zendesk_post_internal_note", "zendesk_post_comment", "zendesk_create_article_draft",
+                  "zendesk_propose_article_update", "zendesk_update_article_draft"}
 
 
-def test_the_only_write_tools_are_internal_notes_and_new_article_drafts():
+def test_the_only_write_tools_are_comments_and_new_article_drafts():
     assert _names(_server()) & WRITE_TOOLS == ALLOWED_WRITES
     assert ALLOWED_TOOLS & WRITE_TOOLS == ALLOWED_WRITES
 
 
-@pytest.mark.parametrize("tool", ["zendesk_post_comment", "zendesk_apply_macro", "zendesk_update_ticket",
+@pytest.mark.parametrize("tool", ["zendesk_apply_macro", "zendesk_update_ticket",
                                   "zendesk_set_ticket_status", "zendesk_create_ticket", "zendesk_assign_ticket"])
-def test_customer_visible_or_ticket_changing_tools_are_absent(tool):
+def test_ticket_changing_tools_are_absent(tool):
     assert tool not in _names(_server())
 
 
@@ -68,6 +69,19 @@ def test_note_sent_through_the_mcp_tool_is_private():
         asyncio.run(srv.call_tool("zendesk_post_internal_note", {"ticket_id": 1, "body": "draft"}))
     sent = client.tickets.update.call_args.args[0]
     assert sent.comment.public is False
+
+
+def test_reply_sent_through_the_mcp_tool_is_public():
+    srv = _server()
+    client = MagicMock()
+    with patch("zendesk_mcp.tools.write_comments.get_client", return_value=client):
+        asyncio.run(srv.call_tool("zendesk_post_comment", {"ticket_id": 1, "body": "hello"}))
+    sent = client.tickets.update.call_args.args[0]
+    assert sent.comment.public is True
+
+
+def test_public_replies_can_be_turned_off_by_deployment():
+    assert "zendesk_post_comment" not in _names(_server(env={"ZENDESK_MCP_DISABLED_TOOLS": "zendesk_post_comment"}))
 
 
 # --- help centre: drafts only, existing articles never touched ---------------------------------
