@@ -140,12 +140,11 @@ def test_readable_config_with_read_only_is_applied_silently(tmp_path, capsys):
 def test_every_write_tool_name_is_a_registered_tool(monkeypatch):
     """A rename or a reclassified write tool must fail here, not quietly leave WRITE_TOOLS stale.
 
-    Boom fork: lift the allowlist to see every declared tool. zendesk_post_comment is the one
-    write tool the fork deletes outright, so it is expected to be missing.
+    Boom fork: lift the allowlist to see every declared tool.
     """
     monkeypatch.setattr("zendesk_mcp.tool_policy.ALLOWED_TOOLS", ALLOWED_TOOLS | WRITE_TOOLS)
     names = _registered_names()
-    assert sorted(WRITE_TOOLS - names) == ["zendesk_post_comment"]
+    assert sorted(WRITE_TOOLS - names) == []
 
 
 def test_disabling_every_registered_tool_by_name_leaves_nothing_registered(capsys):

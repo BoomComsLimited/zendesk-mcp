@@ -41,9 +41,11 @@ WRITE_TOOLS = frozenset({
 })
 
 # Boom fork: a hard allowlist. Only these tools are ever registered, whatever the config file or
-# environment says, so the server can read tickets and add internal notes but can never reply
-# to a customer, change a ticket, apply a macro or log time. Disabling (below) can only narrow
-# this further. Change it here, in code review, not in deployment config.
+# environment says, so the server can read tickets, add internal notes and post public replies
+# (each as the signed-in agent), but can never change a ticket's fields, apply a macro or log
+# time. Disabling (below) can only narrow this further, e.g.
+# ZENDESK_MCP_DISABLED_TOOLS=zendesk_post_comment turns public replies off again. Change it
+# here, in code review, not in deployment config.
 ALLOWED_TOOLS = frozenset({
     "zendesk_search_tickets",
     "zendesk_get_tickets",
@@ -63,6 +65,7 @@ ALLOWED_TOOLS = frozenset({
     "zendesk_list_custom_statuses",
     "zendesk_get_time_tracking",
     "zendesk_post_internal_note",
+    "zendesk_post_comment",  # public reply, e.g. Neo's out-of-hours first response
     # help centre: read freely, write only as drafts (see tools/help_center.py)
     "zendesk_list_help_center_sections",
     "zendesk_list_articles",
