@@ -47,6 +47,13 @@ def make_mock_ticket(ticket_id=12345, subject="Login fails after password reset"
     ticket.url = "https://example.zendesk.com/api/v2/tickets/12345.json"
 
     ticket.requester = make_mock_user("Jane Smith", "jane@customer.com", "end-user")
+    ticket.requester.tags = ["vip"]
+    ticket.requester.created_at = datetime(2025, 1, 2, 9, 0, 0)
+    org = MagicMock()
+    org.id = 301
+    org.name = "Customer Ltd"
+    org.tags = ["neo_responds"]
+    ticket.organization = org
     ticket.assignee = make_mock_user("Test Agent", "agent@example.com", "agent", 202)
 
     group = MagicMock()

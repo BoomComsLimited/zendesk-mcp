@@ -25,6 +25,34 @@ def test_get_ticket_returns_structured_fields(mock_get_client):
 
 
 @patch("zendesk_mcp.tools.ticket.get_client")
+def test_get_ticket_includes_requester_and_organisation_details(mock_get_client):
+    mock_client = MagicMock()
+    mock_client.tickets.return_value = make_mock_ticket()
+    mock_get_client.return_value = mock_client
+
+    from zendesk_mcp.tools.ticket import _get_ticket_data
+    requester = json.loads(_get_ticket_data(12345))["requester"]
+
+    assert requester["id"] == 101
+    assert requester["role"] == "end-user"
+    assert requester["tags"] == ["vip"]
+    assert requester["created_at"].startswith("2025-01-02")
+    assert requester["organization"] == {"id": 301, "name": "Customer Ltd", "tags": ["neo_responds"]}
+
+
+@patch("zendesk_mcp.tools.ticket.get_client")
+def test_get_ticket_without_organisation(mock_get_client):
+    ticket = make_mock_ticket()
+    ticket.organization = None
+    mock_client = MagicMock()
+    mock_client.tickets.return_value = ticket
+    mock_get_client.return_value = mock_client
+
+    from zendesk_mcp.tools.ticket import _get_ticket_data
+    assert json.loads(_get_ticket_data(12345))["requester"]["organization"] is None
+
+
+@patch("zendesk_mcp.tools.ticket.get_client")
 def test_get_ticket_returns_error_string_on_config_error(mock_get_client):
     mock_get_client.side_effect = ConfigError("Zendesk not configured. Run: zendesk-mcp setup")
 

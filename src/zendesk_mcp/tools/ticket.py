@@ -42,6 +42,37 @@ def _search_tickets_data(keywords: str | None, status: str | None, limit: int) -
         return api_error_message(e)
 
 
+def _plain(value):
+    """A JSON-safe copy of a zenpy attribute (str, number, bool, list of those), else None."""
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (list, tuple)):
+        return [v for v in value if isinstance(v, (str, int, float))]
+    if hasattr(value, "isoformat"):
+        return str(value)
+    return None
+
+
+def _requester_data(ticket) -> dict:
+    """Boom fork: also the requester's id, tags and account age, and their organisation, so a
+    caller can tell a long-standing customer from a brand-new sender."""
+    r = ticket.requester
+    org = getattr(ticket, "organization", None)
+    return {
+        "id": _plain(getattr(r, "id", None)),
+        "name": r.name,
+        "email": r.email,
+        "role": _plain(getattr(r, "role", None)),
+        "tags": _plain(getattr(r, "tags", None)) or [],
+        "created_at": _plain(getattr(r, "created_at", None)),
+        "organization": {
+            "id": _plain(getattr(org, "id", None)),
+            "name": _plain(getattr(org, "name", None)),
+            "tags": _plain(getattr(org, "tags", None)) or [],
+        } if org is not None else None,
+    }
+
+
 def _get_ticket_data(ticket_id: int) -> str:
     try:
         client = get_client()
@@ -52,10 +83,7 @@ def _get_ticket_data(ticket_id: int) -> str:
             "status": ticket.status,
             "priority": ticket.priority,
             "type": ticket.type,
-            "requester": {
-                "name": ticket.requester.name,
-                "email": ticket.requester.email,
-            },
+            "requester": _requester_data(ticket),
             "assignee": {
                 "name": ticket.assignee.name,
                 "email": ticket.assignee.email,
