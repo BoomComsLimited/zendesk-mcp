@@ -42,7 +42,8 @@ def test_only_allowlisted_tools_are_registered():
 # triage fields, and NEW help-centre drafts. Nothing that changes status, assignee, requester or
 # group, overwrites a field, or changes an existing article.
 ALLOWED_WRITES = {"zendesk_post_internal_note", "zendesk_post_comment", "zendesk_create_article_draft",
-                  "zendesk_propose_article_update", "zendesk_update_article_draft", "zendesk_set_ticket_fields"}
+                  "zendesk_propose_article_update", "zendesk_update_article_draft", "zendesk_set_ticket_fields",
+                  "zendesk_hand_over_ticket"}
 
 
 def test_the_only_write_tools_are_comments_and_new_article_drafts():
@@ -224,3 +225,36 @@ def test_set_ticket_fields_refuses_and_changes_nothing(args):
 def test_set_ticket_fields_has_no_status_assignee_or_group_parameter():
     [tool] = [t for t in asyncio.run(_server().list_tools()) if t.name == "zendesk_set_ticket_fields"]
     assert set((getattr(tool, "input_schema", None) or tool.inputSchema)["properties"]) == {"ticket_id", "type", "priority", "fields"}
+
+
+def _handover(ticket, my_groups=(1,), me=7):
+    calls = []
+
+    def request(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        r = MagicMock(status_code=200)
+        if url.endswith("/users/me"):
+            r.json.return_value = {"user": {"id": me}}
+        elif "group_memberships" in url:
+            r.json.return_value = {"group_memberships": [{"group_id": g} for g in my_groups]}
+        else:
+            r.json.return_value = {"ticket": ticket}
+        return r
+    with patch("zendesk_mcp.tools.handover.auth.request", side_effect=request), \
+         patch("zendesk_mcp.tools.handover.get_oauth_session", return_value=("acme", "t")):
+        asyncio.run(_server().call_tool("zendesk_hand_over_ticket", {"ticket_id": 5, "to_group_id": 2}))
+    return [c for c in calls if c[0] == "PUT"]
+
+
+def test_handover_changes_only_group_and_assignee():
+    [(_, _, kwargs)] = _handover({"id": 5, "group_id": 1, "assignee_id": None, "updated_at": "x"})
+    assert set(kwargs["json"]["ticket"]) == {"group_id", "assignee_id", "safe_update", "updated_stamp"}
+    assert kwargs["json"]["ticket"]["group_id"] == 2 and kwargs["json"]["ticket"]["assignee_id"] is None
+
+
+def test_handover_refuses_a_ticket_outside_your_groups():
+    assert _handover({"id": 5, "group_id": 3, "assignee_id": None}) == []
+
+
+def test_handover_refuses_a_ticket_assigned_to_someone_else():
+    assert _handover({"id": 5, "group_id": 1, "assignee_id": 99}) == []
