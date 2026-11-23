@@ -38,12 +38,14 @@ WRITE_TOOLS = frozenset({
     "zendesk_remove_tag",
     "zendesk_set_ticket_status",
     "zendesk_update_ticket",
+    "zendesk_set_ticket_fields",
 })
 
 # Boom fork: a hard allowlist. Only these tools are ever registered, whatever the config file or
 # environment says, so the server can read tickets, add internal notes and post public replies
-# (each as the signed-in agent), but can never change a ticket's fields, apply a macro or log
-# time. Disabling (below) can only narrow this further, e.g.
+# (each as the signed-in agent), and fill a ticket's empty triage fields (type, priority, custom
+# dropdowns/multi-selects/text; tools/ticket_fields.py), but can never change status, assignee,
+# requester or group, overwrite a field, apply a macro or log time. Disabling (below) can only narrow this further, e.g.
 # ZENDESK_MCP_DISABLED_TOOLS=zendesk_post_comment turns public replies off again. Change it
 # here, in code review, not in deployment config.
 ALLOWED_TOOLS = frozenset({
@@ -66,6 +68,8 @@ ALLOWED_TOOLS = frozenset({
     "zendesk_get_time_tracking",
     "zendesk_post_internal_note",
     "zendesk_post_comment",  # public reply, e.g. Neo's out-of-hours first response
+    "zendesk_get_ticket_fields",
+    "zendesk_set_ticket_fields",  # fills empty triage fields only, never overwrites
     # help centre: read freely, write only as drafts (see tools/help_center.py)
     "zendesk_list_help_center_sections",
     "zendesk_list_articles",

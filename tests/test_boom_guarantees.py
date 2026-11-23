@@ -1,7 +1,7 @@
 """Boom fork: the guarantees this deployment relies on. If any of these fail, do not deploy.
 
-The server can read tickets, add internal notes, post public replies and write help-centre
-drafts, and nothing else that writes. A note is always private and a reply always public: no
+The server can read tickets, add internal notes, post public replies, fill a ticket's EMPTY
+triage fields, and write help-centre drafts, and nothing else that writes. A note is always private and a reply always public: no
 tool takes a flag that switches between them.
 """
 import asyncio
@@ -38,10 +38,11 @@ def test_only_allowlisted_tools_are_registered():
     assert names <= ALLOWED_TOOLS, f"not allowlisted: {sorted(names - ALLOWED_TOOLS)}"
 
 
-# The only writes: an internal note or a public reply on a ticket, and NEW help-centre drafts.
-# Nothing that changes a ticket's fields or an existing article.
+# The only writes: an internal note or a public reply on a ticket, filling a ticket's empty
+# triage fields, and NEW help-centre drafts. Nothing that changes status, assignee, requester or
+# group, overwrites a field, or changes an existing article.
 ALLOWED_WRITES = {"zendesk_post_internal_note", "zendesk_post_comment", "zendesk_create_article_draft",
-                  "zendesk_propose_article_update", "zendesk_update_article_draft"}
+                  "zendesk_propose_article_update", "zendesk_update_article_draft", "zendesk_set_ticket_fields"}
 
 
 def test_the_only_write_tools_are_comments_and_new_article_drafts():
@@ -165,3 +166,61 @@ def test_updating_a_draft_keeps_it_a_draft(monkeypatch):
     asyncio.run(_server().call_tool("zendesk_update_article_draft", {"article_id": 9, "body_html": "<p>x</p>"}))
     puts = [c for c in calls if c[0] == "PUT"]
     assert len(puts) == 1 and puts[0][2]["translation"]["draft"] is True
+
+
+def _fields_and_ticket(ticket):
+    """auth.request stand-in: the field definitions, then the ticket, then the PUT."""
+    fields = {"ticket_fields": [
+        {"id": 10, "title": "Nature of Ticket", "type": "multiselect", "active": True,
+         "custom_field_options": [{"name": "Call Routing", "value": "call_routing"}]},
+        {"id": 11, "title": "Customer", "type": "text", "active": True},
+        {"id": 12, "title": "Don't Auto Close", "type": "checkbox", "active": True},
+    ], "meta": {"has_more": False}}
+    calls = []
+
+    def request(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        r = MagicMock(status_code=200)
+        r.json.return_value = fields if "ticket_fields" in url else {"ticket": ticket}
+        return r
+    return request, calls
+
+
+def _set(args, ticket):
+    request, calls = _fields_and_ticket(ticket)
+    with patch("zendesk_mcp.tools.ticket_fields.auth.request", side_effect=request), \
+         patch("zendesk_mcp.tools.ticket_fields.get_oauth_session", return_value=("acme", "t")):
+        asyncio.run(_server().call_tool("zendesk_set_ticket_fields", args))
+    return [c for c in calls if c[0] == "PUT"]
+
+
+def test_set_ticket_fields_sends_only_triage_fields():
+    ticket = {"id": 1, "updated_at": "x", "custom_fields": [{"id": 10, "value": None}, {"id": 11, "value": None}]}
+    [(_, _, kwargs)] = _set({"ticket_id": 1, "priority": "normal", "fields": {"10": ["call_routing"], "11": "Acme"}},
+                            ticket)
+    sent = kwargs["json"]["ticket"]
+    assert set(sent) <= {"type", "priority", "custom_fields", "safe_update", "updated_stamp"}
+    assert sent["safe_update"] is True
+
+
+def test_set_ticket_fields_never_overwrites():
+    ticket = {"id": 1, "priority": "high", "updated_at": "x",
+              "custom_fields": [{"id": 10, "value": ["call_routing"]}, {"id": 11, "value": "Agent's choice"}]}
+    assert _set({"ticket_id": 1, "priority": "low", "fields": {"11": "Neo's guess"}}, ticket) == []
+
+
+@pytest.mark.parametrize("args", [
+    {"ticket_id": 1, "fields": {"12": True}},             # a checkbox: not settable
+    {"ticket_id": 1, "fields": {"10": ["not_an_option"]}},  # not one of the options
+    {"ticket_id": 1, "fields": {"99": "x"}},               # not a field
+    {"ticket_id": 1, "fields": {"11": "two\nlines"}},       # text must be one line
+    {"ticket_id": 1, "type": "spam"},
+])
+def test_set_ticket_fields_refuses_and_changes_nothing(args):
+    ticket = {"id": 1, "updated_at": "x", "custom_fields": [{"id": 10, "value": None}, {"id": 11, "value": None}]}
+    assert _set(args, ticket) == []
+
+
+def test_set_ticket_fields_has_no_status_assignee_or_group_parameter():
+    [tool] = [t for t in asyncio.run(_server().list_tools()) if t.name == "zendesk_set_ticket_fields"]
+    assert set((getattr(tool, "input_schema", None) or tool.inputSchema)["properties"]) == {"ticket_id", "type", "priority", "fields"}
